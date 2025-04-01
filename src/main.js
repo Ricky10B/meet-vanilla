@@ -7,45 +7,67 @@ const startVideoCallA = $('.startVideoCallA')
 const startVideoCallB = $('.startVideoCallB')
 const startVideoCallC = $('.startVideoCallC')
 const sendMessage = $('.sendMessage')
+const containerVideos = $('#videos')
 
 const URLWebSocket = 'channel_rtc'
 let webSocket
 
-const peerConnection1a2 = new RTCPeerConnection()
-const peerConnection2a1 = new RTCPeerConnection()
-const peerConnection3a1 = new RTCPeerConnection()
-const peerConnection3a2 = new RTCPeerConnection()
+const peerConnection1 = new RTCPeerConnection()
+const peerConnection2 = new RTCPeerConnection()
+// const peerConnection3a1 = new RTCPeerConnection()
+// const peerConnection3a2 = new RTCPeerConnection()
 
 const TYPES_PEER_CONNECTION = {
   UNO: 'UNO',
   DOS: 'DOS',
-  TRES: 'TRES',
+  // TRES: 'TRES',
+  // TRES_DOS: 'TRES_DOS',
 }
+
+const NUMBERS_PEER_CONNECTIONS = {
+  1: 'UNO',
+  2: 'DOS'
+}
+
+let localStream
+let idsRemoteVideos = {}
+let totalConnections = 0
+let localUser = { id: null }
 
 // LISTENERS
 /*
   A inicia la llamada
   B se conecta a A
-  C se conecta a A y B
+  C se conecta a A
+  C se conecta a B
  */
 startVideoCallA.addEventListener('click', async () => {
   console.log('iniciar llamada A')
+  const numberPeerConnection = TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[totalConnections]]
+  // const numberPeerConnection = TYPES_PEER_CONNECTION.UNO
+  await addLocalVideo(numberPeerConnection)
   await connectToWebSocket()
-  handlerPeerConnection(TYPES_PEER_CONNECTION.UNO)
+  handlerPeerConnection(numberPeerConnection)
 })
 
 startVideoCallB.addEventListener('click', async () => {
   console.log('llamar a A')
+  totalConnections++
+  const numberPeerConnection = TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[totalConnections]]
+  await addLocalVideo(numberPeerConnection)
   await connectToWebSocket()
-  const numberPeerConnection = TYPES_PEER_CONNECTION.DOS
   handlerPeerConnection(numberPeerConnection)
   await createOffer(numberPeerConnection)
 })
 
 startVideoCallC.addEventListener('click', async () => {
   console.log('llamar a A y B')
+  totalConnections++
+  const numberPeerConnection = TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[totalConnections]]
+  await addLocalVideo(numberPeerConnection)
   await connectToWebSocket()
-  handlerPeerConnection(TYPES_PEER_CONNECTION.TRES)
+  handlerPeerConnection(numberPeerConnection)
+  await createOffer(numberPeerConnection)
 })
 
 sendMessage.addEventListener('click', () => {
@@ -61,15 +83,22 @@ async function connectToWebSocket() {
 }
 
 function handlerOnMessageWebSocket(event) {
-  console.log({ event })
   const data = JSON.parse(event.data)
-
+  
   if (data.type === 'offer') {
     console.log('me llego una oferta')
     handlerOffer(data)
   } else if (data.type === 'answer') {
     console.log('me llego una respuesta')
     handlerAnswer(data)
+  } else if (data.type === 'candidate') {
+    // console.log({ event })
+    console.log('me llego un candidato')
+    handlerCandidate(data)
+  } else if (data.type === 'users') {
+    console.log({ data })
+  } else {
+    console.log('opción invalida')
   }
 }
 
@@ -78,11 +107,12 @@ function sendMessageWebSocket (data) {
 }
 
 async function startVideo() {
-  const stream = navigator.mediaDevices.getUserMedia({
+  const stream = await navigator.mediaDevices.getUserMedia({
     video: true,
     audio: true
   })
 
+  localStream = stream
   return stream
 }
 
@@ -90,33 +120,55 @@ function getPeerByNumber(numberPeerConnection) {
   let peer
 
   if (numberPeerConnection === TYPES_PEER_CONNECTION.UNO) {
-    peer = peerConnection1a2
+    peer = peerConnection1
   } else if (numberPeerConnection === TYPES_PEER_CONNECTION.DOS) {
-    peer = peerConnection2a1
-  } else if (numberPeerConnection === TYPES_PEER_CONNECTION.TRES) {
-    peer = peerConnection3a1
-  } else if (numberPeerConnection === TYPES_PEER_CONNECTION.TRES_DOS) {
-    peer = peerConnection3a2
+    peer = peerConnection2
   }
+  // } else if (numberPeerConnection === TYPES_PEER_CONNECTION.TRES) {
+  //   peer = peerConnection3a1
+  // } else if (numberPeerConnection === TYPES_PEER_CONNECTION.TRES_DOS) {
+  //   peer = peerConnection3a2
+  // }
 
   return peer
 }
 
 function handlerPeerConnection(numberPeerConnection) {
-  const peer = getPeerByNumber(numberPeerConnection)
+  // let peer
+  // if (numberPeerConnection === TYPES_PEER_CONNECTION.DOS) {
+  //   peer = getPeerByNumber(TYPES_PEER_CONNECTION.UNO)
+  // } else {
+  //   peer = getPeerByNumber(numberPeerConnection)
+  // }
+  const peer = getPeerByNumber(TYPES_PEER_CONNECTION.UNO)
+
 
   peer.onicecandidate = (event) => {
     if (event.candidate) {
-      console.log('enviando candidatos')
+      sendMessageWebSocket({
+        type: 'candidate',
+        candidate: event.candidate,
+        numberPeerConnection
+      })
     }
   }
 
   peer.ontrack = (event) => {
+    const [stream] = event.streams
+    if (idsRemoteVideos[stream.id]) return
+
     console.log({ event })
+    const remoteVideo = document.createElement('video')
+    remoteVideo.classList.add(`videoRemoto${crypto.randomUUID()}`)
+    remoteVideo.srcObject = stream
+    remoteVideo.autoplay = true
+    remoteVideo.muted = true
+    containerVideos.appendChild(remoteVideo)
+    idsRemoteVideos[stream.id] = stream.id
   }
 
   peer.oniceconnectionstatechange = () => {
-    const state = peer.current.iceConnectionState
+    const state = peer.iceConnectionState
     console.log("ICE Connection State:", state)
 
     if (state === "connected") {
@@ -125,9 +177,14 @@ function handlerPeerConnection(numberPeerConnection) {
       alert("RTC Desconectado")
     }
   }
+
+  localStream.getTracks().forEach((track) => {
+    peer.addTrack(track, localStream)
+  })
 }
 
 async function createOffer (numberPeerConnection) {
+  console.log({ numberPeerConnection })
   // de B a A inicialmente
   const peer = getPeerByNumber(numberPeerConnection)
   const offer = await peer.createOffer()
@@ -149,43 +206,101 @@ async function handlerOffer(dataOffer) {
     sdp
   }
 
-  if (numberPeerConnection === TYPES_PEER_CONNECTION.DOS) {
-    const peer = getPeerByNumber(TYPES_PEER_CONNECTION.UNO)
-    peer.setRemoteDescription(
-      new RTCSessionDescription(offer)
-    )
+  totalConnections++
+  const peer = getPeerByNumber(TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[totalConnections]])
+  await peer.setRemoteDescription(
+    new RTCSessionDescription(offer)
+  )
 
-    const answer = await peer.createAnswer()
-    await peer.setLocalDescription(answer)
+  const answer = await peer.createAnswer()
+  await peer.setLocalDescription(answer)
 
-    const objAnswer = {
-      type: answer.type,
-      sdp: answer.sdp,
-      numberPeerConnection
-    }
-
-    sendMessageWebSocket(objAnswer)
+  const objAnswer = {
+    type: answer.type,
+    sdp: answer.sdp,
+    numberPeerConnection
   }
-  if (numberPeerConnection === TYPES_PEER_CONNECTION.TRES) {
-    // const peer = getPeerByNumber(TYPES_PEER_CONNECTION.UNO)
-    // peerConnection3.setRemoteDescription(
-    //   new RTCSessionDescription(offer)
-    // )
-  }
+
+  sendMessageWebSocket(objAnswer)
+
+  // if (numberPeerConnection === TYPES_PEER_CONNECTION.UNO) {
+  //   const peer = getPeerByNumber(TYPES_PEER_CONNECTION.UNO)
+  //   await peer.setRemoteDescription(
+  //     new RTCSessionDescription(offer)
+  //   )
+
+  //   const answer = await peer.createAnswer()
+  //   await peer.setLocalDescription(answer)
+
+  //   const objAnswer = {
+  //     type: answer.type,
+  //     sdp: answer.sdp,
+  //     numberPeerConnection
+  //   }
+
+  //   sendMessageWebSocket(objAnswer)
+  // } else if (numberPeerConnection === TYPES_PEER_CONNECTION.DOS) {
+  //   const peer = getPeerByNumber(TYPES_PEER_CONNECTION.TRES_DOS)
+  //   await peer.setRemoteDescription(
+  //     new RTCSessionDescription(offer)
+  //   )
+
+  //   const answer = await peer.createAnswer()
+  //   await peer.setLocalDescription(answer)
+
+  //   const objAnswer = {
+  //     type: answer.type,
+  //     sdp: answer.sdp,
+  //     numberPeerConnection
+  //   }
+
+  //   sendMessageWebSocket(objAnswer)
+  // }
 }
 
 async function handlerAnswer(dataAnswer) {
   const { type, sdp, numberPeerConnection } = dataAnswer
 
-  const peer = getPeerByNumber(numberPeerConnection)
-  if (peer.signalingState === 'stable') {
+  const peer = getPeerByNumber(TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[totalConnections]])
+  if (peer.signalingState !== 'stable') {
     const objAnswer = {
       type,
       sdp
     }
 
-    peer.setRemoteDescription(
+    await peer.setRemoteDescription(
       new RTCSessionDescription(objAnswer)
     )
   }
 }
+
+async function handlerCandidate(dataCandidate) {
+  const { candidate, numberPeerConnection } = dataCandidate
+
+  const peer = getPeerByNumber(TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[totalConnections]])
+  const iceCandidate = new RTCIceCandidate(candidate)
+  await peer.addIceCandidate(iceCandidate)
+  // if (numberPeerConnection === TYPES_PEER_CONNECTION.UNO) {
+  //   await peerConnection1.addIceCandidate(iceCandidate)
+  // } else if (numberPeerConnection === TYPES_PEER_CONNECTION.DOS) {
+  //   await peerConnection2.addIceCandidate(iceCandidate)
+  // }
+  // } else if (numberPeerConnection === TYPES_PEER_CONNECTION.TRES) {
+  //   await peerConnection3a2.addIceCandidate(iceCandidate)
+  // }
+}
+
+async function addLocalVideo(numberPeerConnection) {
+  const stream = await startVideo()
+  const video = document.createElement('video')
+  video.classList.add(`video${numberPeerConnection}`)
+  video.srcObject = stream
+  video.autoplay = true
+  video.muted = true
+  containerVideos.appendChild(video)
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  window.localStorage('users', '')
+  localUser = { id: crypto.randomUUID() }
+})
