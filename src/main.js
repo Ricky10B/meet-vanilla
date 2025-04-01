@@ -33,6 +33,7 @@ let localStream
 let idsRemoteVideos = {}
 let totalConnections = 0
 let localUser = { id: null }
+let listUsers = []
 
 // LISTENERS
 /*
@@ -53,21 +54,26 @@ startVideoCallA.addEventListener('click', async () => {
 startVideoCallB.addEventListener('click', async () => {
   console.log('llamar a A')
   totalConnections++
-  const numberPeerConnection = TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[totalConnections]]
-  await addLocalVideo(numberPeerConnection)
   await connectToWebSocket()
-  handlerPeerConnection(numberPeerConnection)
-  await createOffer(numberPeerConnection)
+  for (let i = 0; i < listUsers.length; i++) {
+    const numberPeerConnection = TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[i + 1]]
+    await addLocalVideo(numberPeerConnection)
+    handlerPeerConnection(numberPeerConnection)
+    await createOffer(numberPeerConnection, listUsers[i])
+  }
 })
 
 startVideoCallC.addEventListener('click', async () => {
   console.log('llamar a A y B')
   totalConnections++
-  const numberPeerConnection = TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[totalConnections]]
-  await addLocalVideo(numberPeerConnection)
   await connectToWebSocket()
-  handlerPeerConnection(numberPeerConnection)
-  await createOffer(numberPeerConnection)
+  for (let i = 0; i < listUsers.length; i++) {
+    const remoteUser = listUsers[i]
+    const numberPeerConnection = TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[i + 1]]
+    await addLocalVideo(numberPeerConnection)
+    handlerPeerConnection(numberPeerConnection, remoteUser)
+    await createOffer(numberPeerConnection, remoteUser)
+  }
 })
 
 sendMessage.addEventListener('click', () => {
@@ -80,6 +86,8 @@ async function connectToWebSocket() {
   webSocket = new BroadcastChannel(URLWebSocket)
 
   webSocket.onmessage = handlerOnMessageWebSocket
+
+  sendMessageWebSocket({ type: 'users', users: [localUser] })
 }
 
 function handlerOnMessageWebSocket(event) {
@@ -96,7 +104,10 @@ function handlerOnMessageWebSocket(event) {
     console.log('me llego un candidato')
     handlerCandidate(data)
   } else if (data.type === 'users') {
+    handlerAddUsers(data.users)
+  } else if (data.type === 'addedUser') {
     console.log({ data })
+    handlerAddedUser(data.users)
   } else {
     console.log('opción invalida')
   }
@@ -133,7 +144,7 @@ function getPeerByNumber(numberPeerConnection) {
   return peer
 }
 
-function handlerPeerConnection(numberPeerConnection) {
+function handlerPeerConnection(numberPeerConnection, remoteUser) {
   // let peer
   // if (numberPeerConnection === TYPES_PEER_CONNECTION.DOS) {
   //   peer = getPeerByNumber(TYPES_PEER_CONNECTION.UNO)
@@ -148,7 +159,8 @@ function handlerPeerConnection(numberPeerConnection) {
       sendMessageWebSocket({
         type: 'candidate',
         candidate: event.candidate,
-        numberPeerConnection
+        numberPeerConnection,
+        toIdUser: remoteUser.id
       })
     }
   }
@@ -183,8 +195,8 @@ function handlerPeerConnection(numberPeerConnection) {
   })
 }
 
-async function createOffer (numberPeerConnection) {
-  console.log({ numberPeerConnection })
+async function createOffer (numberPeerConnection, dataUser) {
+  console.log({ numberPeerConnection, dataUser })
   // de B a A inicialmente
   const peer = getPeerByNumber(numberPeerConnection)
   const offer = await peer.createOffer()
@@ -192,7 +204,9 @@ async function createOffer (numberPeerConnection) {
   const objOffer = {
     type: offer.type,
     sdp: offer.sdp,
-    numberPeerConnection: numberPeerConnection
+    numberPeerConnection: numberPeerConnection,
+    toIdUser: dataUser.id,
+    fromIdUser: localUser.id
   }
 
   sendMessageWebSocket(objOffer)
@@ -200,14 +214,15 @@ async function createOffer (numberPeerConnection) {
 
 async function handlerOffer(dataOffer) {
   console.log({ dataOffer })
-  const { type, sdp, numberPeerConnection } = dataOffer
+  const { type, sdp, numberPeerConnection, toIdUser, fromIdUser } = dataOffer
+
+  if (localUser.id !== toIdUser) return
   const offer = {
     type,
     sdp
   }
 
-  totalConnections++
-  const peer = getPeerByNumber(TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[totalConnections]])
+  const peer = getPeerByNumber(TYPES_PEER_CONNECTION[numberPeerConnection])
   await peer.setRemoteDescription(
     new RTCSessionDescription(offer)
   )
@@ -218,7 +233,8 @@ async function handlerOffer(dataOffer) {
   const objAnswer = {
     type: answer.type,
     sdp: answer.sdp,
-    numberPeerConnection
+    numberPeerConnection,
+    toIdUser: fromIdUser
   }
 
   sendMessageWebSocket(objAnswer)
@@ -259,9 +275,11 @@ async function handlerOffer(dataOffer) {
 }
 
 async function handlerAnswer(dataAnswer) {
-  const { type, sdp, numberPeerConnection } = dataAnswer
+  const { type, sdp, numberPeerConnection, toIdUser } = dataAnswer
 
-  const peer = getPeerByNumber(TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[totalConnections]])
+  if (localUser.id !== toIdUser) return
+
+  const peer = getPeerByNumber(TYPES_PEER_CONNECTION[numberPeerConnection])
   if (peer.signalingState !== 'stable') {
     const objAnswer = {
       type,
@@ -275,9 +293,11 @@ async function handlerAnswer(dataAnswer) {
 }
 
 async function handlerCandidate(dataCandidate) {
-  const { candidate, numberPeerConnection } = dataCandidate
+  const { candidate, numberPeerConnection, toIdUser } = dataCandidate
 
-  const peer = getPeerByNumber(TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[totalConnections]])
+  if (localUser.id !== toIdUser) return
+
+  const peer = getPeerByNumber(TYPES_PEER_CONNECTION[numberPeerConnection])
   const iceCandidate = new RTCIceCandidate(candidate)
   await peer.addIceCandidate(iceCandidate)
   // if (numberPeerConnection === TYPES_PEER_CONNECTION.UNO) {
@@ -300,7 +320,24 @@ async function addLocalVideo(numberPeerConnection) {
   containerVideos.appendChild(video)
 }
 
+function handlerAddUsers(dataUsers) {
+  handlerAddedUser(dataUsers)
+  sendMessageWebSocket({ type: 'addedUser', users: [localUser] })
+}
+
+function handlerAddedUser(dataUsers) {
+  const [dataUser] = dataUsers
+
+  const userExists = listUsers.find(prevUser => prevUser.id === dataUser.id)
+  if (userExists) return
+
+  listUsers.push(dataUser)
+  // window.localStorage.setItem('users', JSON.stringify(listUsers))
+  $('#otherUsers').textContent = JSON.stringify(listUsers)
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  window.localStorage('users', '')
+  window.localStorage.setItem('users', '')
   localUser = { id: crypto.randomUUID() }
+  $('#user').textContent = localUser.id
 })
