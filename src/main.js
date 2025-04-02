@@ -11,7 +11,6 @@ const containerVideos = $('#videos')
 
 const URLWebSocket = 'channel_rtc'
 let webSocket
-
 const peerConnection1 = new RTCPeerConnection()
 const peerConnection2 = new RTCPeerConnection()
 // const peerConnection3a1 = new RTCPeerConnection()
@@ -19,7 +18,7 @@ const peerConnection2 = new RTCPeerConnection()
 
 const TYPES_PEER_CONNECTION = {
   UNO: 'UNO',
-  DOS: 'DOS',
+  DOS: 'DOS'
   // TRES: 'TRES',
   // TRES_DOS: 'TRES_DOS',
 }
@@ -30,10 +29,10 @@ const NUMBERS_PEER_CONNECTIONS = {
 }
 
 let localStream
-let idsRemoteVideos = {}
+const idsRemoteVideos = {}
 let totalConnections = 0
 let localUser = { id: null }
-let listUsers = []
+const listUsers = []
 
 // LISTENERS
 /*
@@ -92,7 +91,7 @@ async function connectToWebSocket() {
 
 function handlerOnMessageWebSocket(event) {
   const data = JSON.parse(event.data)
-  
+
   if (data.type === 'offer') {
     console.log('me llego una oferta')
     handlerOffer(data)
@@ -113,7 +112,7 @@ function handlerOnMessageWebSocket(event) {
   }
 }
 
-function sendMessageWebSocket (data) {
+function sendMessageWebSocket(data) {
   webSocket.postMessage(JSON.stringify(data ?? { message: 'mensaje por el channel' }))
 }
 
@@ -153,7 +152,6 @@ function handlerPeerConnection(numberPeerConnection, remoteUser) {
   // }
   const peer = getPeerByNumber(TYPES_PEER_CONNECTION.UNO)
 
-
   peer.onicecandidate = (event) => {
     if (event.candidate) {
       sendMessageWebSocket({
@@ -181,12 +179,12 @@ function handlerPeerConnection(numberPeerConnection, remoteUser) {
 
   peer.oniceconnectionstatechange = () => {
     const state = peer.iceConnectionState
-    console.log("ICE Connection State:", state)
+    console.log('ICE Connection State:', state)
 
-    if (state === "connected") {
-      console.log("RTC Conectado")
-    } else if (state === "disconnected") {
-      alert("RTC Desconectado")
+    if (state === 'connected') {
+      console.log('RTC Conectado')
+    } else if (state === 'disconnected') {
+      alert('RTC Desconectado')
     }
   }
 
@@ -195,7 +193,7 @@ function handlerPeerConnection(numberPeerConnection, remoteUser) {
   })
 }
 
-async function createOffer (numberPeerConnection, dataUser) {
+async function createOffer(numberPeerConnection, dataUser) {
   console.log({ numberPeerConnection, dataUser })
   // de B a A inicialmente
   const peer = getPeerByNumber(numberPeerConnection)
@@ -204,7 +202,7 @@ async function createOffer (numberPeerConnection, dataUser) {
   const objOffer = {
     type: offer.type,
     sdp: offer.sdp,
-    numberPeerConnection: numberPeerConnection,
+    numberPeerConnection,
     toIdUser: dataUser.id,
     fromIdUser: localUser.id
   }
@@ -238,40 +236,6 @@ async function handlerOffer(dataOffer) {
   }
 
   sendMessageWebSocket(objAnswer)
-
-  // if (numberPeerConnection === TYPES_PEER_CONNECTION.UNO) {
-  //   const peer = getPeerByNumber(TYPES_PEER_CONNECTION.UNO)
-  //   await peer.setRemoteDescription(
-  //     new RTCSessionDescription(offer)
-  //   )
-
-  //   const answer = await peer.createAnswer()
-  //   await peer.setLocalDescription(answer)
-
-  //   const objAnswer = {
-  //     type: answer.type,
-  //     sdp: answer.sdp,
-  //     numberPeerConnection
-  //   }
-
-  //   sendMessageWebSocket(objAnswer)
-  // } else if (numberPeerConnection === TYPES_PEER_CONNECTION.DOS) {
-  //   const peer = getPeerByNumber(TYPES_PEER_CONNECTION.TRES_DOS)
-  //   await peer.setRemoteDescription(
-  //     new RTCSessionDescription(offer)
-  //   )
-
-  //   const answer = await peer.createAnswer()
-  //   await peer.setLocalDescription(answer)
-
-  //   const objAnswer = {
-  //     type: answer.type,
-  //     sdp: answer.sdp,
-  //     numberPeerConnection
-  //   }
-
-  //   sendMessageWebSocket(objAnswer)
-  // }
 }
 
 async function handlerAnswer(dataAnswer) {
@@ -300,14 +264,6 @@ async function handlerCandidate(dataCandidate) {
   const peer = getPeerByNumber(TYPES_PEER_CONNECTION[numberPeerConnection])
   const iceCandidate = new RTCIceCandidate(candidate)
   await peer.addIceCandidate(iceCandidate)
-  // if (numberPeerConnection === TYPES_PEER_CONNECTION.UNO) {
-  //   await peerConnection1.addIceCandidate(iceCandidate)
-  // } else if (numberPeerConnection === TYPES_PEER_CONNECTION.DOS) {
-  //   await peerConnection2.addIceCandidate(iceCandidate)
-  // }
-  // } else if (numberPeerConnection === TYPES_PEER_CONNECTION.TRES) {
-  //   await peerConnection3a2.addIceCandidate(iceCandidate)
-  // }
 }
 
 async function addLocalVideo(numberPeerConnection) {
