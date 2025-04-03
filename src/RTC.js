@@ -3,36 +3,28 @@ import { $ } from './utilities/selector'
 import { connectToWebSocket, sendMessageWebSocket } from './websocket'
 
 // VARIABLES
-const startVideoCallA = $('.startVideoCallA')
-// const startVideoCallB = $('.startVideoCallB')
-// const startVideoCallC = $('.startVideoCallC')
+const startVideoCall = $('.startVideoCall')
 // const sendMessage = $('.sendMessage')
 const containerVideos = $('#videos')
 
 const listUsers = []
 const peerConnections = {}
 const listIdsVideoAddeds = {}
+const TYPES_MESSAGES_WEB_SOCKET = {
+  'isCaller': handlerIsCaller,
+  'users': handlerAddAllUsersConnected,
+  'new-user-connected': handlerNewUserConnected,
+  // 'response-all-users-connected': handlerAddAllUsersConnected,
+  'offer': handlerOffer,
+  'answer': handlerAnswer,
+  'candidate': handlerCandidate
+}
 
 let localStream
 let localUser = { id: null }
 
 // LISTENERS
-
-startVideoCallA.addEventListener('click', startConnection)
-// startVideoCallA.addEventListener('click', async () => {
-//   console.log('iniciar llamada A')
-//   await startConnection()
-// })
-
-// startVideoCallB.addEventListener('click', async () => {
-//   console.log('iniciar llamada B')
-//   await startConnection()
-// })
-
-// startVideoCallC.addEventListener('click', async () => {
-//   console.log('iniciar llamada C')
-//   await startConnection()
-// })
+startVideoCall.addEventListener('click', startConnection)
 
 // FUNCTIONS
 async function startConnection() {
@@ -66,57 +58,51 @@ async function addVideoToDocument(stream, idVideo) {
 function handlerOnMessageWebSocket(event) {
   const data = JSON.parse(event.data)
 
-  // console.log({ event, data })
-
+  if (data.users) data.type = 'users'
   if (data.toIdUser != null && data.toIdUser !== localUser.id) return
 
-  if (data.type === 'new-user-connected') {
-    handlerNewUserConnected(data)
-  } else if (data.type === 'response-all-users-connected') {
-    handlerAddAllUsersConnected(data)
-  } else if (data.type === 'offer') {
-    handlerOffer(data)
-  } else if (data.type === 'answer') {
-    handlerAnswer(data)
-  } else if (data.type === 'candidate') {
-    handlerCandidate(data)
-  } else {
-    console.log('opcion invalida')
-  }
+  const functionMessageWebSocket = TYPES_MESSAGES_WEB_SOCKET[data.type]
+  typeof functionMessageWebSocket === 'function'
+    ? functionMessageWebSocket(data)
+    : console.log('opcion invalida')
 }
 
-function handlerNewUserConnected(data) {
-  listUsers.push(data.user)
-  sendMessageWebSocket({ type: 'response-all-users-connected', users: [...listUsers, localUser] })
+function handlerIsCaller(dataIsCaller) {
+  const { id } = dataIsCaller
+  localUser.id = id
+  $('#user').textContent = id
+
+  sendMessageWebSocket({ type: 'new-user-connected', user: localUser })
+  sendMessageWebSocket({ type: 'users' })
+}
+
+function handlerNewUserConnected(dataUser) {
+  listUsers.push(dataUser.user)
+  // sendMessageWebSocket({ type: 'response-all-users-connected', users: [...listUsers, localUser] })
 }
 
 function handlerAddAllUsersConnected(data) {
   for (const user of data.users) {
-    const userExists = listUsers.find(prevUser => prevUser.id === user.id)
-    if (!userExists && user.id !== localUser.id) {
+    const userExists = listUsers.find(prevUser => prevUser.id === user.channel_name)
+    if (!userExists && user.channel_name !== localUser.id) {
+      user.id = user.channel_name
       listUsers.push(user)
-      console.log({ user })
       createOffer(user, localUser)
     }
   }
-
 }
 
-// function createPeerConnection() {}
-
-async function createOffer(user, localUser) {
+function createPeerConnection(user) {
   const configuracion = {
     iceServers: [{
       urls: "stun:stun.l.google.com:19302",
     }],
   }
 
-  // const idPeer = crypto.randomUUID() // el id del usuario al que me quiero conectar
   const idPeer = user.id
   const peerConnection = new RTCPeerConnection(configuracion)
 
   peerConnection.ontrack = (event) => {
-    console.log({ event })
     const [stream] = event.streams
     addVideoToDocument(stream, user.id)
   }
@@ -130,15 +116,12 @@ async function createOffer(user, localUser) {
         toIdPeer: localUser.id
       }
 
-      // console.log('evento candidato', event, candidateSender)
-
       sendMessageWebSocket(candidateSender)
     }
   }
 
   peerConnection.oniceconnectionstatechange = () => {
     const state = peerConnection.iceConnectionState
-    console.log('ICE Connection State:', state)
 
     if (state === 'connected') {
       console.log('RTC Conectado')
@@ -150,21 +133,25 @@ async function createOffer(user, localUser) {
   peerConnections[idPeer] = {
     peer: peerConnection
   }
-  // console.log('crear oferta para', user.id)
 
   localStream.getTracks().forEach(track => {
     peerConnection.addTrack(track, localStream)
   })
 
+  return peerConnection
+}
+
+async function createOffer(user, localUser) {
+  const peerConnection = createPeerConnection(user)
   const offer = await peerConnection.createOffer()
-  peerConnection.setLocalDescription(offer)
+  await peerConnection.setLocalDescription(offer)
 
   const offerSender = {
     type: offer.type,
     sdp: offer.sdp,
     toIdUser: user.id,
     fromIdUser: localUser.id,
-    toIdPeer: idPeer,
+    toIdPeer: user.id,
     fromIdPeer: localUser.id
   }
 
@@ -173,59 +160,8 @@ async function createOffer(user, localUser) {
 
 async function handlerOffer(dataOffer) {
   const { type, sdp, toIdUser, fromIdUser, toIdPeer, fromIdPeer } = dataOffer
-  // console.log('crear answer de', toIdUser, 'para', fromIdUser)
 
-  const configuracion = {
-    iceServers: [{
-      urls: "stun:stun.l.google.com:19302",
-    }],
-  }
-
-  const idPeer = fromIdPeer
-  const peerConnection = new RTCPeerConnection(configuracion)
-
-  peerConnection.ontrack = (event) => {
-    console.log({ event })
-    const [stream] = event.streams
-    addVideoToDocument(stream, fromIdUser)
-  }
-
-  peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
-      const candidateSender = {
-        type: 'candidate',
-        candidate: event.candidate,
-        toIdUser: fromIdUser,
-        toIdPeer: localUser.id
-      }
-
-      // console.log('evento candidato', event, candidateSender)
-
-      sendMessageWebSocket(candidateSender)
-    }
-  }
-
-  peerConnection.oniceconnectionstatechange = () => {
-    const state = peerConnection.iceConnectionState
-    console.log('ICE Connection State:', state)
-
-    if (state === 'connected') {
-      console.log('RTC Conectado')
-    } else if (state === 'disconnected') {
-      window.alert('RTC Desconectado')
-    }
-  }
-
-  // const idPeer = crypto.randomUUID()
-  peerConnections[idPeer] = {
-    peer: peerConnection
-  }
-  // crear un peer y devolver el peer recibido de la oferta
-
-  localStream.getTracks().forEach(track => {
-    peerConnection.addTrack(track, localStream)
-  })
-
+  const peerConnection = createPeerConnection({ id: fromIdPeer })
   const offer = {
     type,
     sdp
@@ -250,11 +186,8 @@ async function handlerOffer(dataOffer) {
 }
 
 async function handlerAnswer(dataAnswer) {
-  const { type, sdp, toIdUser, fromIdUser, fromIdPeer } = dataAnswer
-  // console.log('recibiendo answer de', fromIdUser, 'para', toIdUser)
+  const { type, sdp, fromIdPeer } = dataAnswer
 
-  // console.log(`setear el valor para el peer`, peerConnections[fromIdPeer])
-  // console.log({ peerConnections, fromIdPeer })
   const peer = peerConnections[fromIdPeer].peer
   if (peer.signalingState !== 'stable') {
     const answer = {
@@ -268,10 +201,7 @@ async function handlerAnswer(dataAnswer) {
 }
 
 async function handlerCandidate(dataCandidate) {
-  console.log(dataCandidate)
   const { candidate, toIdPeer } = dataCandidate
-
-  console.log({ peerConnections, toIdPeer })
 
   const peer = peerConnections[toIdPeer].peer
   if (!peer) return
@@ -279,8 +209,3 @@ async function handlerCandidate(dataCandidate) {
   const iceCandidate = new window.RTCIceCandidate(candidate)
   await peer.addIceCandidate(iceCandidate)
 }
-
-document.addEventListener('DOMContentLoaded', () => {
-  localUser = { id: crypto.randomUUID() }
-  $('#user').textContent = localUser.id
-})

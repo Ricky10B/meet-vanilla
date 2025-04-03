@@ -1,119 +1,39 @@
 import './style.css'
-
-const $ = (el) => document.querySelector(el)
+import { $ } from './utilities/selector'
+import { connectToWebSocket, sendMessageWebSocket } from './websocket'
 
 // VARIABLES
-const startVideoCallA = $('.startVideoCallA')
-const startVideoCallB = $('.startVideoCallB')
-const startVideoCallC = $('.startVideoCallC')
-const sendMessage = $('.sendMessage')
+const startVideoCall = $('.startVideoCall')
+// const sendMessage = $('.sendMessage')
 const containerVideos = $('#videos')
 
-const URLWebSocket = 'channel_rtc'
-let webSocket
-const peerConnection1 = new RTCPeerConnection()
-const peerConnection2 = new RTCPeerConnection()
-// const peerConnection3a1 = new RTCPeerConnection()
-// const peerConnection3a2 = new RTCPeerConnection()
-
-const TYPES_PEER_CONNECTION = {
-  UNO: 'UNO',
-  DOS: 'DOS'
-  // TRES: 'TRES',
-  // TRES_DOS: 'TRES_DOS',
-}
-
-const NUMBERS_PEER_CONNECTIONS = {
-  1: 'UNO',
-  2: 'DOS'
+const listUsers = []
+const peerConnections = {}
+const listIdsVideoAddeds = {}
+const TYPES_MESSAGES_WEB_SOCKET = {
+  'new-user-connected': handlerNewUserConnected,
+  'response-all-users-connected': handlerAddAllUsersConnected,
+  'offer': handlerOffer,
+  'answer': handlerAnswer,
+  'candidate': handlerCandidate
 }
 
 let localStream
-const idsRemoteVideos = {}
-let totalConnections = 0
 let localUser = { id: null }
-const listUsers = []
 
 // LISTENERS
-/*
-  A inicia la llamada
-  B se conecta a A
-  C se conecta a A
-  C se conecta a B
- */
-startVideoCallA.addEventListener('click', async () => {
-  console.log('iniciar llamada A')
-  const numberPeerConnection = TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[totalConnections]]
-  // const numberPeerConnection = TYPES_PEER_CONNECTION.UNO
-  await addLocalVideo(numberPeerConnection)
-  await connectToWebSocket()
-  handlerPeerConnection(numberPeerConnection)
+document.addEventListener('DOMContentLoaded', () => {
+  localUser = { id: crypto.randomUUID() }
+  $('#user').textContent = localUser.id
 })
 
-startVideoCallB.addEventListener('click', async () => {
-  console.log('llamar a A')
-  totalConnections++
-  await connectToWebSocket()
-  for (let i = 0; i < listUsers.length; i++) {
-    const numberPeerConnection = TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[i + 1]]
-    await addLocalVideo(numberPeerConnection)
-    handlerPeerConnection(numberPeerConnection)
-    await createOffer(numberPeerConnection, listUsers[i])
-  }
-})
-
-startVideoCallC.addEventListener('click', async () => {
-  console.log('llamar a A y B')
-  totalConnections++
-  await connectToWebSocket()
-  for (let i = 0; i < listUsers.length; i++) {
-    const remoteUser = listUsers[i]
-    const numberPeerConnection = TYPES_PEER_CONNECTION[NUMBERS_PEER_CONNECTIONS[i + 1]]
-    await addLocalVideo(numberPeerConnection)
-    handlerPeerConnection(numberPeerConnection, remoteUser)
-    await createOffer(numberPeerConnection, remoteUser)
-  }
-})
-
-sendMessage.addEventListener('click', () => {
-  console.log('enviar mensaje')
-  sendMessageWebSocket()
-})
+startVideoCall.addEventListener('click', startConnection)
 
 // FUNCTIONS
-async function connectToWebSocket() {
-  webSocket = new BroadcastChannel(URLWebSocket)
-
-  webSocket.onmessage = handlerOnMessageWebSocket
-
-  sendMessageWebSocket({ type: 'users', users: [localUser] })
-}
-
-function handlerOnMessageWebSocket(event) {
-  const data = JSON.parse(event.data)
-
-  if (data.type === 'offer') {
-    console.log('me llego una oferta')
-    handlerOffer(data)
-  } else if (data.type === 'answer') {
-    console.log('me llego una respuesta')
-    handlerAnswer(data)
-  } else if (data.type === 'candidate') {
-    // console.log({ event })
-    console.log('me llego un candidato')
-    handlerCandidate(data)
-  } else if (data.type === 'users') {
-    handlerAddUsers(data.users)
-  } else if (data.type === 'addedUser') {
-    console.log({ data })
-    handlerAddedUser(data.users)
-  } else {
-    console.log('opción invalida')
-  }
-}
-
-function sendMessageWebSocket(data) {
-  webSocket.postMessage(JSON.stringify(data ?? { message: 'mensaje por el channel' }))
+async function startConnection() {
+  const stream = await startVideo()
+  addVideoToDocument(stream)
+  connectToWebSocket(handlerOnMessageWebSocket, localUser)
 }
 
 async function startVideo() {
@@ -126,174 +46,158 @@ async function startVideo() {
   return stream
 }
 
-function getPeerByNumber(numberPeerConnection) {
-  let peer
+async function addVideoToDocument(stream, idVideo) {
+  if (listIdsVideoAddeds[stream.id]) return
+  listIdsVideoAddeds[stream.id] = stream.id
 
-  if (numberPeerConnection === TYPES_PEER_CONNECTION.UNO) {
-    peer = peerConnection1
-  } else if (numberPeerConnection === TYPES_PEER_CONNECTION.DOS) {
-    peer = peerConnection2
-  }
-  // } else if (numberPeerConnection === TYPES_PEER_CONNECTION.TRES) {
-  //   peer = peerConnection3a1
-  // } else if (numberPeerConnection === TYPES_PEER_CONNECTION.TRES_DOS) {
-  //   peer = peerConnection3a2
-  // }
-
-  return peer
-}
-
-function handlerPeerConnection(numberPeerConnection, remoteUser) {
-  // let peer
-  // if (numberPeerConnection === TYPES_PEER_CONNECTION.DOS) {
-  //   peer = getPeerByNumber(TYPES_PEER_CONNECTION.UNO)
-  // } else {
-  //   peer = getPeerByNumber(numberPeerConnection)
-  // }
-  const peer = getPeerByNumber(TYPES_PEER_CONNECTION.UNO)
-
-  peer.onicecandidate = (event) => {
-    if (event.candidate) {
-      sendMessageWebSocket({
-        type: 'candidate',
-        candidate: event.candidate,
-        numberPeerConnection,
-        toIdUser: remoteUser.id
-      })
-    }
-  }
-
-  peer.ontrack = (event) => {
-    const [stream] = event.streams
-    if (idsRemoteVideos[stream.id]) return
-
-    console.log({ event })
-    const remoteVideo = document.createElement('video')
-    remoteVideo.classList.add(`videoRemoto${crypto.randomUUID()}`)
-    remoteVideo.srcObject = stream
-    remoteVideo.autoplay = true
-    remoteVideo.muted = true
-    containerVideos.appendChild(remoteVideo)
-    idsRemoteVideos[stream.id] = stream.id
-  }
-
-  peer.oniceconnectionstatechange = () => {
-    const state = peer.iceConnectionState
-    console.log('ICE Connection State:', state)
-
-    if (state === 'connected') {
-      console.log('RTC Conectado')
-    } else if (state === 'disconnected') {
-      alert('RTC Desconectado')
-    }
-  }
-
-  localStream.getTracks().forEach((track) => {
-    peer.addTrack(track, localStream)
-  })
-}
-
-async function createOffer(numberPeerConnection, dataUser) {
-  console.log({ numberPeerConnection, dataUser })
-  // de B a A inicialmente
-  const peer = getPeerByNumber(numberPeerConnection)
-  const offer = await peer.createOffer()
-  await peer.setLocalDescription(offer)
-  const objOffer = {
-    type: offer.type,
-    sdp: offer.sdp,
-    numberPeerConnection,
-    toIdUser: dataUser.id,
-    fromIdUser: localUser.id
-  }
-
-  sendMessageWebSocket(objOffer)
-}
-
-async function handlerOffer(dataOffer) {
-  console.log({ dataOffer })
-  const { type, sdp, numberPeerConnection, toIdUser, fromIdUser } = dataOffer
-
-  if (localUser.id !== toIdUser) return
-  const offer = {
-    type,
-    sdp
-  }
-
-  const peer = getPeerByNumber(TYPES_PEER_CONNECTION[numberPeerConnection])
-  await peer.setRemoteDescription(
-    new RTCSessionDescription(offer)
-  )
-
-  const answer = await peer.createAnswer()
-  await peer.setLocalDescription(answer)
-
-  const objAnswer = {
-    type: answer.type,
-    sdp: answer.sdp,
-    numberPeerConnection,
-    toIdUser: fromIdUser
-  }
-
-  sendMessageWebSocket(objAnswer)
-}
-
-async function handlerAnswer(dataAnswer) {
-  const { type, sdp, numberPeerConnection, toIdUser } = dataAnswer
-
-  if (localUser.id !== toIdUser) return
-
-  const peer = getPeerByNumber(TYPES_PEER_CONNECTION[numberPeerConnection])
-  if (peer.signalingState !== 'stable') {
-    const objAnswer = {
-      type,
-      sdp
-    }
-
-    await peer.setRemoteDescription(
-      new RTCSessionDescription(objAnswer)
-    )
-  }
-}
-
-async function handlerCandidate(dataCandidate) {
-  const { candidate, numberPeerConnection, toIdUser } = dataCandidate
-
-  if (localUser.id !== toIdUser) return
-
-  const peer = getPeerByNumber(TYPES_PEER_CONNECTION[numberPeerConnection])
-  const iceCandidate = new RTCIceCandidate(candidate)
-  await peer.addIceCandidate(iceCandidate)
-}
-
-async function addLocalVideo(numberPeerConnection) {
-  const stream = await startVideo()
   const video = document.createElement('video')
-  video.classList.add(`video${numberPeerConnection}`)
+  video.classList.add(`video${idVideo ?? ''}`)
   video.srcObject = stream
   video.autoplay = true
   video.muted = true
   containerVideos.appendChild(video)
 }
 
-function handlerAddUsers(dataUsers) {
-  handlerAddedUser(dataUsers)
-  sendMessageWebSocket({ type: 'addedUser', users: [localUser] })
+function handlerOnMessageWebSocket(event) {
+  const data = JSON.parse(event.data)
+
+  if (data.toIdUser != null && data.toIdUser !== localUser.id) return
+
+  const functionMessageWebSocket = TYPES_MESSAGES_WEB_SOCKET[data.type]
+  typeof functionMessageWebSocket === 'function'
+    ? functionMessageWebSocket(data)
+    : console.log('opcion invalida')
 }
 
-function handlerAddedUser(dataUsers) {
-  const [dataUser] = dataUsers
-
-  const userExists = listUsers.find(prevUser => prevUser.id === dataUser.id)
-  if (userExists) return
-
-  listUsers.push(dataUser)
-  // window.localStorage.setItem('users', JSON.stringify(listUsers))
-  $('#otherUsers').textContent = JSON.stringify(listUsers)
+function handlerNewUserConnected(data) {
+  listUsers.push(data.user)
+  sendMessageWebSocket({ type: 'response-all-users-connected', users: [...listUsers, localUser] })
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  window.localStorage.setItem('users', '')
-  localUser = { id: crypto.randomUUID() }
-  $('#user').textContent = localUser.id
-})
+function handlerAddAllUsersConnected(data) {
+  for (const user of data.users) {
+    const userExists = listUsers.find(prevUser => prevUser.id === user.id)
+    if (!userExists && user.id !== localUser.id) {
+      listUsers.push(user)
+      createOffer(user, localUser)
+    }
+  }
+}
+
+function createPeerConnection(user) {
+  const configuracion = {
+    iceServers: [{
+      urls: "stun:stun.l.google.com:19302",
+    }],
+  }
+
+  const idPeer = user.id
+  const peerConnection = new RTCPeerConnection(configuracion)
+
+  peerConnection.ontrack = (event) => {
+    const [stream] = event.streams
+    addVideoToDocument(stream, user.id)
+  }
+
+  peerConnection.onicecandidate = (event) => {
+    if (event.candidate) {
+      const candidateSender = {
+        type: 'candidate',
+        candidate: event.candidate,
+        toIdUser: user.id,
+        toIdPeer: localUser.id
+      }
+
+      sendMessageWebSocket(candidateSender)
+    }
+  }
+
+  peerConnection.oniceconnectionstatechange = () => {
+    const state = peerConnection.iceConnectionState
+
+    if (state === 'connected') {
+      console.log('RTC Conectado')
+    } else if (state === 'disconnected') {
+      window.alert('RTC Desconectado')
+    }
+  }
+
+  peerConnections[idPeer] = {
+    peer: peerConnection
+  }
+
+  localStream.getTracks().forEach(track => {
+    peerConnection.addTrack(track, localStream)
+  })
+
+  return peerConnection
+}
+
+async function createOffer(user, localUser) {
+  const peerConnection = createPeerConnection(user)
+  const offer = await peerConnection.createOffer()
+  await peerConnection.setLocalDescription(offer)
+
+  const offerSender = {
+    type: offer.type,
+    sdp: offer.sdp,
+    toIdUser: user.id,
+    fromIdUser: localUser.id,
+    toIdPeer: user.id,
+    fromIdPeer: localUser.id
+  }
+
+  sendMessageWebSocket(offerSender)
+}
+
+async function handlerOffer(dataOffer) {
+  const { type, sdp, toIdUser, fromIdUser, toIdPeer, fromIdPeer } = dataOffer
+
+  const peerConnection = createPeerConnection({ id: fromIdPeer })
+  const offer = {
+    type,
+    sdp
+  }
+
+  await peerConnection.setRemoteDescription(
+    new window.RTCSessionDescription(offer)
+  )
+  const answer = await peerConnection.createAnswer()
+  await peerConnection.setLocalDescription(answer)
+
+  const answerSender = {
+    type: answer.type,
+    sdp: answer.sdp,
+    toIdUser: fromIdUser,
+    fromIdUser: toIdUser,
+    toIdPeer: fromIdPeer,
+    fromIdPeer: toIdPeer
+  }
+
+  sendMessageWebSocket(answerSender)
+}
+
+async function handlerAnswer(dataAnswer) {
+  const { type, sdp, fromIdPeer } = dataAnswer
+
+  const peer = peerConnections[fromIdPeer].peer
+  if (peer.signalingState !== 'stable') {
+    const answer = {
+      type,
+      sdp
+    }
+    await peer.setRemoteDescription(
+      new window.RTCSessionDescription(answer)
+    )
+  }
+}
+
+async function handlerCandidate(dataCandidate) {
+  const { candidate, toIdPeer } = dataCandidate
+
+  const peer = peerConnections[toIdPeer].peer
+  if (!peer) return
+
+  const iceCandidate = new window.RTCIceCandidate(candidate)
+  await peer.addIceCandidate(iceCandidate)
+}
