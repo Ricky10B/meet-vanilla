@@ -1,9 +1,14 @@
+import { isHaveCamera } from './isHaveCamera'
 import './style.css'
+import { generateRandomRGBColor } from './utilities/generateRandomRGBColor'
 import { $ } from './utilities/selector'
-import { connectToWebSocket, sendMessageWebSocket } from './websocket'
+import { connectToWebSocket, sendMessageWebSocket, closeWebSocket } from './websocket'
 
 // VARIABLES
 const startVideoCall = $('.startVideoCall')
+const endVideoCall = $('.endVideoCall')
+const stopAudio = $('.stopAudio')
+const stopVideo = $('.stopVideo')
 // const sendMessage = $('.sendMessage')
 const containerVideos = $('#videos')
 
@@ -17,7 +22,8 @@ const TYPES_MESSAGES_WEB_SOCKET = {
   // 'response-all-users-connected': handlerAddAllUsersConnected,
   'offer': handlerOffer,
   'answer': handlerAnswer,
-  'candidate': handlerCandidate
+  'candidate': handlerCandidate,
+  'user-disconnected': handlerUserDisconnect
 }
 
 let localStream
@@ -25,6 +31,9 @@ let localUser = { id: null }
 
 // LISTENERS
 startVideoCall.addEventListener('click', startConnection)
+endVideoCall.addEventListener('click', endConnection)
+stopAudio.addEventListener('click', () => handlerEnabledTracks('audio'))
+stopVideo.addEventListener('click', () => handlerEnabledTracks('video'))
 
 // FUNCTIONS
 async function startConnection() {
@@ -33,26 +42,92 @@ async function startConnection() {
   connectToWebSocket(handlerOnMessageWebSocket, localUser)
 }
 
-async function startVideo() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: true,
-    audio: true
-  })
-
-  localStream = stream
-  return stream
+function endConnection() {
+  sendMessageWebSocket({ type: 'user-disconnected', idPeerDisconnected: localUser.id })
+  endVideo()
+  removeVideoFromDocument()
+  closePeerConnection()
+  closeWebSocket()
 }
 
-async function addVideoToDocument(stream, idVideo) {
+function handlerUserDisconnect(dataUserDisconnected) {
+  console.log({ dataUserDisconnected, peerConnections })
+  const idUserRemote = dataUserDisconnected.idPeerDisconnected
+  // const peer = new RTCPeerConnection()
+  const peer = peerConnections[idUserRemote]?.peer
+  if (!peer) return
+  // peer.getSenders().forEach(sender => sender.track.stop())
+
+  if (peer.connectionState === 'connected') peer.close()
+
+  removeVideoFromDocument(idUserRemote)
+  delete peerConnections[idUserRemote]
+  console.log({ peerConnections })
+}
+
+async function startVideo() {
+  const hasCamera = await isHaveCamera()
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: hasCamera,
+      audio: true,
+    })
+
+    localStream = stream
+    return stream
+  } catch (error) {
+    console.error(error)
+    throw error
+  }
+}
+
+function endVideo() {
+  const tracks = localStream.getTracks()
+  if (tracks) tracks.forEach(track => track.stop())
+  localStream = null
+}
+
+function addVideoToDocument(stream, idVideo) {
   if (listIdsVideoAddeds[stream.id]) return
   listIdsVideoAddeds[stream.id] = stream.id
 
   const video = document.createElement('video')
-  video.classList.add(`video${idVideo ?? ''}`)
+  let classVideo = 'local'
+  if (idVideo) {
+    classVideo = idVideo.replaceAll('.', '').replaceAll('!', '')
+  }
+  video.classList.add('video', `video-${classVideo}`)
   video.srcObject = stream
   video.autoplay = true
-  video.muted = true
+  // video.muted = true
+  if (stream == null) {
+    video.style.background = generateRandomRGBColor()
+  }
   containerVideos.appendChild(video)
+}
+
+function removeVideoFromDocument(idVideoToRemove) {
+  let classVideo = 'local'
+  if (idVideoToRemove) {
+    classVideo = idVideoToRemove.replaceAll('.', '').replaceAll('!', '')
+  }
+  $(`.video-${classVideo}`)?.remove()
+}
+
+function handlerEnabledTracks(type) {
+  const tracks = localStream.getTracks()
+  tracks.forEach(track => {
+    if (track.kind === type) {
+      track.enabled = !track.enabled
+      if (type === 'audio') {
+        stopAudio.textContent = track.enabled ? 'quitar audio' : 'poner audio'
+      } else if (type === 'video') {
+        stopVideo.textContent = track.enabled ? 'quitar video' : 'poner video'
+        $('.video-local').style.background = generateRandomRGBColor()
+      }
+    }
+  })
 }
 
 function handlerOnMessageWebSocket(event) {
@@ -134,7 +209,7 @@ function createPeerConnection(user) {
     peer: peerConnection
   }
 
-  localStream.getTracks().forEach(track => {
+  localStream.getTracks()?.forEach(track => {
     peerConnection.addTrack(track, localStream)
   })
 
@@ -208,4 +283,14 @@ async function handlerCandidate(dataCandidate) {
 
   const iceCandidate = new window.RTCIceCandidate(candidate)
   await peer.addIceCandidate(iceCandidate)
+}
+
+function closePeerConnection() {
+  localUser = { id: null }
+  $('#user').textContent = ''
+  // tomar todos los usuarios de peerConnections y cerrar los peers
+  const idsPeers = Object.keys(peerConnections)
+  idsPeers.forEach(idPeer => {
+    handlerUserDisconnect({ idPeerDisconnected: idPeer })
+  })
 }
