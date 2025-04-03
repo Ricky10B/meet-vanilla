@@ -9,6 +9,7 @@ const startVideoCall = $('.startVideoCall')
 const endVideoCall = $('.endVideoCall')
 const stopAudio = $('.stopAudio')
 const stopVideo = $('.stopVideo')
+const shareScreen = $('.shareScreen')
 // const sendMessage = $('.sendMessage')
 const containerVideos = $('#videos')
 
@@ -16,10 +17,9 @@ const listUsers = []
 const peerConnections = {}
 const listIdsVideoAddeds = {}
 const TYPES_MESSAGES_WEB_SOCKET = {
-  'isCaller': handlerIsCaller,
+  'user_connect': handlerUserConnect,
   'users': handlerAddAllUsersConnected,
   'new-user-connected': handlerNewUserConnected,
-  // 'response-all-users-connected': handlerAddAllUsersConnected,
   'offer': handlerOffer,
   'answer': handlerAnswer,
   'candidate': handlerCandidate,
@@ -34,12 +34,13 @@ startVideoCall.addEventListener('click', startConnection)
 endVideoCall.addEventListener('click', endConnection)
 stopAudio.addEventListener('click', () => handlerEnabledTracks('audio'))
 stopVideo.addEventListener('click', () => handlerEnabledTracks('video'))
+shareScreen.addEventListener('click', handlerShareScreen)
 
 // FUNCTIONS
 async function startConnection() {
   const stream = await startVideo()
   addVideoToDocument(stream)
-  connectToWebSocket(handlerOnMessageWebSocket, localUser)
+  connectToWebSocket(handlerOnMessageWebSocket)
 }
 
 function endConnection() {
@@ -131,9 +132,8 @@ function handlerEnabledTracks(type) {
 }
 
 function handlerOnMessageWebSocket(event) {
+  console.log(event)
   const data = JSON.parse(event.data)
-
-  if (data.users) data.type = 'users'
   if (data.toIdUser != null && data.toIdUser !== localUser.id) return
 
   const functionMessageWebSocket = TYPES_MESSAGES_WEB_SOCKET[data.type]
@@ -142,8 +142,21 @@ function handlerOnMessageWebSocket(event) {
     : console.log('opcion invalida')
 }
 
-function handlerIsCaller(dataIsCaller) {
-  const { id } = dataIsCaller
+async function handlerShareScreen() {
+  const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+  addVideoToDocument(screenStream, localUser.id)
+  screenStream.getTracks().forEach(track => {
+    const listIdsPeerConnection = Object.keys(peerConnections)
+    listIdsPeerConnection.forEach(idPeerConnection => {
+      console.log({ track, idPeerConnection, peerConnections })
+      peerConnections[idPeerConnection].peer.addTrack(track, screenStream)
+    })
+  })
+}
+
+function handlerUserConnect(dataUserConnect) {
+  console.log({ dataUserConnect })
+  const id = dataUserConnect.channel_name
   localUser.id = id
   $('#user').textContent = id
 
@@ -178,8 +191,11 @@ function createPeerConnection(user) {
   const peerConnection = new RTCPeerConnection(configuracion)
 
   peerConnection.ontrack = (event) => {
-    const [stream] = event.streams
-    addVideoToDocument(stream, user.id)
+    console.log({ event })
+    // const [stream] = event.streams
+    event.streams.forEach(stream => {
+      addVideoToDocument(stream, user.id)
+    })
   }
 
   peerConnection.onicecandidate = (event) => {
@@ -209,7 +225,7 @@ function createPeerConnection(user) {
     peer: peerConnection
   }
 
-  localStream.getTracks()?.forEach(track => {
+  localStream.getTracks().forEach(track => {
     peerConnection.addTrack(track, localStream)
   })
 
