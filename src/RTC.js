@@ -10,7 +10,6 @@ const endVideoCall = $('.endVideoCall')
 const stopAudio = $('.stopAudio')
 const stopVideo = $('.stopVideo')
 const shareScreen = $('.shareScreen')
-// const sendMessage = $('.sendMessage')
 const containerVideos = $('#videos')
 
 const listUsers = []
