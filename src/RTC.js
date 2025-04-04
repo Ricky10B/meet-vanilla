@@ -1,4 +1,4 @@
-import { isHaveCamera } from './isHaveCamera'
+import { isHaveCamera } from './utilities/isHaveCamera'
 import './style.css'
 import { generateRandomRGBColor } from './utilities/generateRandomRGBColor'
 import { $ } from './utilities/selector'
@@ -10,7 +10,6 @@ const endVideoCall = $('.endVideoCall')
 const stopAudio = $('.stopAudio')
 const stopVideo = $('.stopVideo')
 const shareScreen = $('.shareScreen')
-// const sendMessage = $('.sendMessage')
 const containerVideos = $('#videos')
 
 const listUsers = []
