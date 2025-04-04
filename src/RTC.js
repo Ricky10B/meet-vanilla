@@ -23,7 +23,7 @@ const TYPES_MESSAGES_WEB_SOCKET = {
   'offer': handlerOffer,
   'answer': handlerAnswer,
   'candidate': handlerCandidate,
-  'user-disconnected': handlerUserDisconnect
+  'user-disconnect': handlerUserDisconnect
 }
 
 let localStream
@@ -44,7 +44,7 @@ async function startConnection() {
 }
 
 function endConnection() {
-  sendMessageWebSocket({ type: 'user-disconnected', idPeerDisconnected: localUser.id })
+  // sendMessageWebSocket({ type: 'user-disconnected', idPeerDisconnected: localUser.id })
   endVideo()
   removeVideoFromDocument()
   closePeerConnection()
@@ -310,3 +310,19 @@ function closePeerConnection() {
     handlerUserDisconnect({ idPeerDisconnected: idPeer })
   })
 }
+
+/**
+ * TODO
+ * compartir pantalla
+ * reconexiones
+ * errores de conexion
+ * errores de permiso y de uso de dispositivos
+ * borrar el usuario desconectado
+ * manejar la resolucion de la camara en base a la calidad del internet
+ * manejar audio y video antes de entrar a las llamadas
+ * chat del canal
+ * chat general
+ * varios canales de voz
+ * supresor de krisp
+ * manejo de los botones de la llamada
+ */
